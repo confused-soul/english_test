@@ -3,14 +3,12 @@ import streamlit as st
 from audio_recorder_streamlit import audio_recorder
 import tempfile
 import os
-import pyttsx3
 import re
 import random
 import time
 from datetime import datetime
 from questions import reading, repeating, jumbled, qna, stories, hr
 import asyncio
-import threading
 
 # Access your API key as an environment variable
 api_key = st.secrets["api_key"]
@@ -147,11 +145,14 @@ if "test_started" not in st.session_state:
 if "evaluations" not in st.session_state:
     st.session_state.evaluations = []
 
-if "is_speaking" not in st.session_state:
-    st.session_state.is_speaking = False
+if "question_audio" not in st.session_state:
+    st.session_state.question_audio = None
 
-if "audio_played" not in st.session_state:
-    st.session_state.audio_played = False
+if "current_recording" not in st.session_state:
+    st.session_state.current_recording = None
+
+if "show_audio_player" not in st.session_state:
+    st.session_state.show_audio_player = False
 
 # Update questions button
 if st.sidebar.button("🔄 Update Questions"):
@@ -171,14 +172,14 @@ if st.sidebar.button("🔄 Update Questions"):
     ]
     # Reset test state
     for key in ['count', 'evaluations', 'test_end', 'test_started', 'current_section_no', 
-                'current_question_no', 'is_speaking', 'audio_played']:
+                'current_question_no', 'question_audio', 'current_recording', 'show_audio_player']:
         if key in st.session_state:
             if key == 'evaluations':
                 st.session_state[key] = []
             elif key in ['count', 'current_section_no', 'current_question_no']:
                 st.session_state[key] = 0
             else:
-                st.session_state[key] = False
+                st.session_state[key] = None if key in ['question_audio', 'current_recording'] else False
     
     st.session_state.readable = True
     st.session_state.current_section = sections[0]
@@ -194,28 +195,44 @@ if st.session_state.evaluations:
 else:
     st.sidebar.write("*No evaluations yet*")
 
-# TTS function using threading to avoid blocking
-def speak_text(text):
-    def tts_thread():
-        try:
-            engine = pyttsx3.init()
-            engine.setProperty('rate', 120)
-            engine.setProperty('volume', 0.9)
-            engine.say(text)
-            engine.runAndWait()
-            engine.stop()
-        except Exception as e:
-            st.error(f"TTS Error: {str(e)}")
-        finally:
-            st.session_state.is_speaking = False
-            st.session_state.audio_played = True
+# Alternative: Use browser's built-in speech synthesis
+def generate_speech_button(text, button_text="🔊 Listen"):
+    """Create a button that uses browser's speech synthesis"""
+    button_id = f"speech_button_{hash(text)}"
     
-    if not st.session_state.is_speaking:
-        st.session_state.is_speaking = True
-        st.session_state.audio_played = False
-        thread = threading.Thread(target=tts_thread)
-        thread.daemon = True
-        thread.start()
+    # HTML with JavaScript for speech synthesis
+    speech_html = f"""
+    <button id="{button_id}" onclick="speakText_{button_id}()" 
+            style="
+                background-color: #ff6b6b;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                border-radius: 5px;
+                cursor: pointer;
+                font-size: 16px;
+                margin: 5px;
+            ">
+        {button_text}
+    </button>
+    
+    <script>
+    function speakText_{button_id}() {{
+        if ('speechSynthesis' in window) {{
+            window.speechSynthesis.cancel(); // Cancel any ongoing speech
+            const utterance = new SpeechSynthesisUtterance(`{text}`);
+            utterance.rate = 0.8;
+            utterance.pitch = 1;
+            utterance.volume = 1;
+            window.speechSynthesis.speak(utterance);
+        }} else {{
+            alert('Speech synthesis not supported in this browser');
+        }}
+    }}
+    </script>
+    """
+    
+    st.components.v1.html(speech_html, height=60)
 
 def update_question():
     st.session_state.current_question_no += 1
@@ -233,7 +250,9 @@ def update_question():
     
     st.session_state.current_section = sections[st.session_state.current_section_no]
     st.session_state.readable = st.session_state.current_section_no == 0
-    st.session_state.audio_played = False
+    st.session_state.question_audio = None
+    st.session_state.current_recording = None
+    st.session_state.show_audio_player = False
     
     if st.session_state.current_section_no == 0:
         st.session_state.current_question = f"Question Number: {st.session_state.current_question_no + 1}/{len(st.session_state.quests[st.session_state.current_section_no])}: {st.session_state.quests[st.session_state.current_section_no][st.session_state.current_question_no]}"
@@ -315,23 +334,27 @@ if st.session_state.test_started and not st.session_state.test_end:
     
     # Listen to question button (for sections other than reading)
     if st.session_state.current_section_no != 0:
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            if st.button("🔊 Listen to Question", 
-                        disabled=st.session_state.is_speaking,
-                        use_container_width=True):
-                speak_text(st.session_state.quests[st.session_state.current_section_no][st.session_state.current_question_no])
+        # Show the question text
+        question_text = st.session_state.quests[st.session_state.current_section_no][st.session_state.current_question_no]
         
-        with col2:
-            if st.session_state.is_speaking:
-                st.warning("🎵 Playing audio...")
-            elif st.session_state.audio_played:
-                st.success("✅ Audio played")
-    
+        # Use browser's speech synthesis for audio
+        st.write("🔊 **Listen to Question:**")
+        if st.session_state.current_section_no == 2:
+            q = ""
+            for part in question_text:
+                q = q + part + ". "
+            generate_speech_button(q, "🔊 Play Audio")
+        else:
+            generate_speech_button(question_text, "🔊 Play Audio")
+
     st.write("---")
     
     # Audio recording using audio_recorder_streamlit
     st.write("🎙️ **Record your answer:**")
+    
+    # Create unique key for audio recorder to reset it when needed
+    recorder_key = f"audio_recorder_{st.session_state.current_section_no}_{st.session_state.current_question_no}"
+    
     audio_bytes = audio_recorder(
         text="Click to record",
         recording_color="#e8b62c",
@@ -339,13 +362,22 @@ if st.session_state.test_started and not st.session_state.test_end:
         icon_name="microphone",
         icon_size="2x",
         pause_threshold=2.0,
-        sample_rate=16000
+        sample_rate=16000,
+        key=recorder_key
     )
     
-    if audio_bytes:
-        st.audio(audio_bytes, format="audio/wav")
+    # Store the current recording
+    if audio_bytes and audio_bytes != st.session_state.current_recording:
+        st.session_state.current_recording = audio_bytes
+        st.session_state.show_audio_player = True
+    
+    # Show recorded audio and options
+    if st.session_state.current_recording and st.session_state.show_audio_player:
+        st.write("🎵 **Your recorded answer:**")
+        st.audio(st.session_state.current_recording, format="audio/wav")
         
-        col1, col2 = st.columns([1, 1])
+        col1, col2, col3 = st.columns([1, 1, 1])
+        
         with col1:
             if st.button("✅ Submit Answer", type="primary", use_container_width=True):
                 with st.spinner("🔍 Evaluating your answer..."):
@@ -354,7 +386,7 @@ if st.session_state.test_started and not st.session_state.test_end:
                         score, remark = asyncio.run(evaluate_audio(
                             st.session_state.current_section_no,
                             st.session_state.quests[st.session_state.current_section_no][st.session_state.current_question_no],
-                            audio_bytes
+                            st.session_state.current_recording
                         ))
                         st.success(f"Score: {score}/100 - {remark}")
                         time.sleep(2)
@@ -363,8 +395,18 @@ if st.session_state.test_started and not st.session_state.test_end:
                         st.error(f"Error during evaluation: {str(e)}")
         
         with col2:
-            if st.button("🔄 Re-record", use_container_width=True):
+            if st.button("🔄 Record Again", use_container_width=True):
+                st.session_state.current_recording = None
+                st.session_state.show_audio_player = False
                 st.rerun()
+        
+        with col3:
+            if st.button("⏭️ Skip Question", use_container_width=True):
+                st.warning("Question skipped - No score awarded")
+                update_question()
+    
+    elif not st.session_state.show_audio_player:
+        st.info("👆 Use the microphone button above to record your answer")
 
 elif st.session_state.test_end:
     st.balloons()
@@ -393,7 +435,8 @@ elif st.session_state.test_end:
     if st.button("🔄 Restart Test", use_container_width=True):
         # Reset all session states
         keys_to_reset = ['count', 'evaluations', 'test_end', 'test_started', 
-                        'current_section_no', 'current_question_no', 'is_speaking', 'audio_played']
+                        'current_section_no', 'current_question_no', 'question_audio', 
+                        'current_recording', 'show_audio_player']
         for key in keys_to_reset:
             if key in st.session_state:
                 if key == 'evaluations':
@@ -401,7 +444,7 @@ elif st.session_state.test_end:
                 elif key in ['count', 'current_section_no', 'current_question_no']:
                     st.session_state[key] = 0
                 else:
-                    st.session_state[key] = False
+                    st.session_state[key] = None if key in ['question_audio', 'current_recording'] else False
         
         st.session_state.readable = True
         st.session_state.instructions = """
