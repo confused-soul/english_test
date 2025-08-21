@@ -3,3 +3,4 @@ google-generativeai
 audio-recorder-streamlit
 pyttsx3
 numpy
+gtts
