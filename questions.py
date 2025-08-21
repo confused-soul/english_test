@@ -167,7 +167,6 @@ jumbled = [
     ("an international firm", "They collaborated", "on this", "initiative.", "with"),
     ("She conducted", "research on", "extensive", "the topic", "for her thesis."),
     ("key findings", "highlights the", "The report", "of the investigation."),
-    ("He is looking forward", "to attending", "the training workshop", "next week."),
     ("a grand event.", "celebrated its", "The company", "tenth anniversary", "with"),
     ("has been working", "She", "since the start", "remotely", "of the pandemic."),
     ("will take place", "The system upgrade", "during the weekend.", ""),
