@@ -195,44 +195,123 @@ if st.session_state.evaluations:
 else:
     st.sidebar.write("*No evaluations yet*")
 
-# Alternative: Use browser's built-in speech synthesis
+# Alternative: Use browser's built-in speech synthesis with better handling
 def generate_speech_button(text, button_text="🔊 Listen"):
-    """Create a button that uses browser's speech synthesis"""
-    button_id = f"speech_button_{hash(text)}"
+    """Create a button that uses browser's speech synthesis with better error handling"""
+    # Create a unique identifier for this specific text and session
+    button_id = f"speech_button_{abs(hash(text + str(time.time())))}"
     
-    # HTML with JavaScript for speech synthesis
+    # Clean text for speech synthesis (remove special characters that might cause issues)
+    clean_text = text.replace('"', "'").replace('\n', ' ').replace('\r', ' ')
+    
+    # HTML with JavaScript for speech synthesis with better error handling
     speech_html = f"""
-    <button id="{button_id}" onclick="speakText_{button_id}()" 
-            style="
-                background-color: #ff6b6b;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
-                cursor: pointer;
-                font-size: 16px;
-                margin: 5px;
-            ">
-        {button_text}
-    </button>
+    <div style="margin: 10px 0;">
+        <button id="{button_id}" onclick="speakText_{button_id}()" 
+                style="
+                    background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+                    color: white;
+                    border: none;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    cursor: pointer;
+                    font-size: 16px;
+                    font-weight: bold;
+                    box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                    transition: all 0.3s ease;
+                "
+                onmouseover="this.style.transform='translateY(-2px)'"
+                onmouseout="this.style.transform='translateY(0px)'">
+            {button_text}
+        </button>
+        <div id="status_{button_id}" style="margin-top: 8px; font-size: 12px; color: #666;"></div>
+    </div>
     
     <script>
+    let isPlaying_{button_id} = false;
+    let currentUtterance_{button_id} = null;
+    
     function speakText_{button_id}() {{
+        const button = document.getElementById('{button_id}');
+        const status = document.getElementById('status_{button_id}');
+        
         if ('speechSynthesis' in window) {{
-            window.speechSynthesis.cancel(); // Cancel any ongoing speech
-            const utterance = new SpeechSynthesisUtterance(`{text}`);
-            utterance.rate = 0.8;
-            utterance.pitch = 1;
-            utterance.volume = 1;
-            window.speechSynthesis.speak(utterance);
+            // Stop any ongoing speech first
+            window.speechSynthesis.cancel();
+            
+            // Wait a bit for the cancellation to complete
+            setTimeout(() => {{
+                try {{
+                    if (isPlaying_{button_id}) {{
+                        // If already playing, stop it
+                        window.speechSynthesis.cancel();
+                        isPlaying_{button_id} = false;
+                        button.innerHTML = '{button_text}';
+                        status.innerHTML = '';
+                        return;
+                    }}
+                    
+                    // Create new utterance
+                    currentUtterance_{button_id} = new SpeechSynthesisUtterance(`{clean_text}`);
+                    
+                    // Set properties
+                    currentUtterance_{button_id}.rate = 0.85;
+                    currentUtterance_{button_id}.pitch = 1.0;
+                    currentUtterance_{button_id}.volume = 1.0;
+                    currentUtterance_{button_id}.lang = 'en-US';
+                    
+                    // Event handlers
+                    currentUtterance_{button_id}.onstart = function() {{
+                        isPlaying_{button_id} = true;
+                        button.innerHTML = '⏸️ Stop';
+                        button.style.background = 'linear-gradient(45deg, #orange, #ff8c00)';
+                        status.innerHTML = '🎵 Playing...';
+                    }};
+                    
+                    currentUtterance_{button_id}.onend = function() {{
+                        isPlaying_{button_id} = false;
+                        button.innerHTML = '{button_text}';
+                        button.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a52)';
+                        status.innerHTML = '✅ Completed';
+                        setTimeout(() => {{ status.innerHTML = ''; }}, 2000);
+                    }};
+                    
+                    currentUtterance_{button_id}.onerror = function(event) {{
+                        isPlaying_{button_id} = false;
+                        button.innerHTML = '{button_text}';
+                        button.style.background = 'linear-gradient(45deg, #ff6b6b, #ee5a52)';
+                        status.innerHTML = '❌ Error: ' + event.error;
+                        setTimeout(() => {{ status.innerHTML = ''; }}, 3000);
+                    }};
+                    
+                    // Speak the text
+                    window.speechSynthesis.speak(currentUtterance_{button_id});
+                    
+                }} catch (error) {{
+                    status.innerHTML = '❌ Error: ' + error.message;
+                    console.error('Speech synthesis error:', error);
+                }}
+            }}, 100);
+            
         }} else {{
-            alert('Speech synthesis not supported in this browser');
+            status.innerHTML = '❌ Speech synthesis not supported in this browser';
         }}
     }}
+    
+    // Reset function for cleanup
+    function resetSpeech_{button_id}() {{
+        if (window.speechSynthesis) {{
+            window.speechSynthesis.cancel();
+        }}
+        isPlaying_{button_id} = false;
+    }}
+    
+    // Auto-cleanup on page unload
+    window.addEventListener('beforeunload', resetSpeech_{button_id});
     </script>
     """
     
-    st.components.v1.html(speech_html, height=60)
+    st.components.v1.html(speech_html, height=80)
 
 def update_question():
     st.session_state.current_question_no += 1
@@ -335,6 +414,7 @@ if st.session_state.test_started and not st.session_state.test_end:
     # Listen to question button (for sections other than reading)
     if st.session_state.current_section_no != 0:
         # Show the question text
+        st.write("📝 **Question:**")
         question_text = st.session_state.quests[st.session_state.current_section_no][st.session_state.current_question_no]
         
         # Use browser's speech synthesis for audio
@@ -346,7 +426,13 @@ if st.session_state.test_started and not st.session_state.test_end:
             generate_speech_button(q, "🔊 Play Audio")
         else:
             generate_speech_button(question_text, "🔊 Play Audio")
-
+        
+        # Add a manual refresh option if speech fails
+        col1, col2 = st.columns([2, 1])
+        with col2:
+            if st.button("🔄 Reset Audio", help="Click if audio is not working"):
+                st.rerun()
+    
     st.write("---")
     
     # Audio recording using audio_recorder_streamlit
